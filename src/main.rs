@@ -1,3 +1,5 @@
+mod config;
+
 use std::fmt;
 use std::str::FromStr;
 
@@ -15,66 +17,10 @@ use inquire::formatter::CustomTypeFormatter;
 use strum::IntoEnumIterator;
 use strum::EnumIter;
 
+use clap::{Parser, Subcommand};
 
-// #[derive(Debug, sqlx::FromRow)]
-// struct SleepLog {
-//     id: Option<i32>,
-//     start: String,
-//     end: Option<String>,
-//     awake_count: Option<i32>,
-//     quality: Option<i32>,
-//     is_sleep_ritual: Option<bool>,
-//     is_stress: Option<bool>,
-//     mood: Option<i32>,
-//     is_heartburn: Option<bool>,
-//     is_ibs_flareup: Option<bool>,
-//     melatonin: Option<f32>,
-//     exertion: Option<i32>,
-// }
-//
-// struct CreateSleepLog {
-//     start: String,
-//     end: Option<String>,
-//     awake_count: Option<i32>,
-//     quality: Option<i32>,
-//     is_sleep_ritual: Option<bool>,
-//     is_stress: Option<bool>,
-//     mood: Option<i32>,
-//     is_heartburn: Option<bool>,
-//     is_ibs_flareup: Option<bool>,
-//     melatonin: Option<f32>,
-//     exertion: Option<i32>,
-// }
+use config::Config;
 
-// impl CreateSleepLog {
-//     fn new(
-//         start: String,
-//         end: Option<String>,
-//         awake_count: Option<i32>,
-//         quality: Option<i32>,
-//         is_sleep_ritual: Option<bool>,
-//         is_stress: Option<bool>,
-//         mood: Option<i32>,
-//         is_heartburn: Option<bool>,
-//         is_ibs_flareup: Option<bool>,
-//         melatonin: Option<f32>,
-//         exertion: Option<i32>,
-//     ) -> CreateSleepLog {
-//         CreateSleepLog {
-//             start,
-//             end,
-//             awake_count,
-//             quality,
-//             is_sleep_ritual,
-//             is_stress,
-//             mood,
-//             is_heartburn,
-//             is_ibs_flareup,
-//             melatonin,
-//             exertion,
-//         }
-//     }
-// }
 
 #[derive(Debug, EnumIter, strum_macros::Display)]
 enum Quality {
@@ -134,12 +80,78 @@ impl Exertion {
     }
 }
 
+#[derive(Parser)]
+#[command(name = "slog")]
+#[command(about = "CLI Sleep Log - Track your sleep data", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
 
+#[derive(Subcommand)]
+enum Commands {
+    /// Record new sleep data
+    Record,
+    /// Edit configuration settings
+    Config {
+        /// Configuration field to edit (start_time_default, end_time_default, db_location)
+        field: String,
+        /// New value for the field
+        value: String,
+    },
+    /// Show current configuration
+    ShowConfig,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>  {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::Config { field, value }) => {
+            edit_config(field, value)?;
+        }
+        Some(Commands::ShowConfig) => {
+            show_config()?;
+        }
+        Some(Commands::Record) | None => {
+            record_sleep().await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn edit_config(field: String, value: String) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = Config::load()?;
+    config.update_field(&field, value)?;
+    config.save()?;
+    println!("Updated {} successfully!", field);
+    Ok(())
+}
+
+fn show_config() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::load()?;
+    println!("Current configuration:");
+    println!("  Config file: {}", Config::config_path().display());
+    println!("  start_time_default: {}", config.start_time_default);
+    println!("  end_time_default: {}", config.end_time_default);
+    println!("  db_location: {}", config.db_location);
+    Ok(())
+}
+
+async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
+    // Load config
+    let config = Config::load()?;
+
+    // Ensure database directory exists
+    let db_path = std::path::Path::new(&config.db_location);
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
     // creates database if doesn't exist
-    let opts = SqliteConnectOptions::from_str("sqlite:/Users/marlonmuellersoppart/.sleep_log/db")?
+    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?
         .create_if_missing(true);
 
     let pool = SqlitePool::connect_with(opts).await.expect("Failed to connect with db");
@@ -160,12 +172,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>  {
     let end_date_str = end_date.format("%Y-%m-%d").to_string();
 
     let _start_time: String = Text::new("Start Time: in HH:MM:SS")
-        .with_default("21:30:00")
+        .with_default(&config.start_time_default)
         .prompt()?;
     let start = format!("{start_date_str} {_start_time}");
 
     let _end_time: String = Text::new("End Time: in HH:MM:SS")
-        .with_default("05:30:00")
+        .with_default(&config.end_time_default)
         .prompt()?;
     let end = format!("{end_date_str} {_end_time}");
 
@@ -236,6 +248,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>  {
         .bind(melatonin)
         .bind(exertion.db_value())
         .execute(&pool).await?;
+
+    println!("Sleep data recorded successfully!");
 
     Ok(())
 }
