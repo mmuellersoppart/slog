@@ -8,6 +8,8 @@ pub struct Config {
     pub start_time_default: String,
     pub end_time_default: String,
     pub db_file_path: String,
+    pub google_sheets_id: Option<String>,
+    pub google_credentials_path: Option<String>,
 }
 
 impl Default for Config {
@@ -25,6 +27,8 @@ impl Default for Config {
             start_time_default: "21:30:00".to_string(),
             end_time_default: "05:30:00".to_string(),
             db_file_path: default_db,
+            google_sheets_id: None,
+            google_credentials_path: None,
         }
     }
 }
@@ -75,6 +79,14 @@ impl Config {
             }
             "db_file_path" => {
                 self.db_file_path = value;
+                Ok(())
+            }
+            "google_sheets_id" => {
+                self.google_sheets_id = Some(value);
+                Ok(())
+            }
+            "google_credentials_path" => {
+                self.google_credentials_path = Some(value);
                 Ok(())
             }
             _ => Err(format!("Unknown field: {}", field)),

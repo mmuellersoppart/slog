@@ -1,4 +1,5 @@
 mod config;
+mod sheets;
 
 use std::fmt;
 use std::str::FromStr;
@@ -6,21 +7,25 @@ use std::str::FromStr;
 use tokio::runtime::Runtime;
 
 use sqlx::ConnectOptions;
-use sqlx::sqlite::{SqlitePool, SqliteConnectOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 
-use std::fmt::{Display, Formatter};
 use chrono::{Datelike, Days, Local, NaiveDate, Utc};
+use std::fmt::{Display, Formatter};
 
-use inquire::{error::{CustomUserError, InquireResult}, required, CustomType, DateSelect, MultiSelect, Select, Text, Confirm};
 use inquire::formatter::CustomTypeFormatter;
+use inquire::{
+    Confirm, CustomType, DateSelect, MultiSelect, Select, Text,
+    error::{CustomUserError, InquireResult},
+    required,
+};
 
-use strum::IntoEnumIterator;
 use strum::EnumIter;
+use strum::IntoEnumIterator;
 
 use clap::{Parser, Subcommand};
 
 use config::Config;
-
+use sheets::SheetsExporter;
 
 #[derive(Debug, EnumIter, strum_macros::Display)]
 enum Quality {
@@ -30,7 +35,6 @@ enum Quality {
     Okay,
     Perfection,
 }
-
 
 impl Quality {
     fn db_value(&self) -> i8 {
@@ -44,15 +48,12 @@ impl Quality {
     }
 }
 
-
-
 #[derive(Debug, EnumIter, strum_macros::Display)]
 enum Exertion {
     Lazy,
     Normal,
     Exhausted,
 }
-
 
 impl Exertion {
     fn db_value(&self) -> i8 {
@@ -78,17 +79,19 @@ enum Commands {
     Record,
     /// Edit configuration settings
     Config {
-        /// Configuration field to edit (start_time_default, end_time_default, db_location)
+        /// Configuration field to edit (start_time_default, end_time_default, db_file_path, google_sheets_id, google_credentials_path)
         field: String,
         /// New value for the field
         value: String,
     },
     /// Show current configuration
     ShowConfig,
+    /// Export all data to Google Sheets
+    Export,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>>  {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -97,6 +100,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>  {
         }
         Some(Commands::ShowConfig) => {
             show_config()?;
+        }
+        Some(Commands::Export) => {
+            export_to_sheets().await?;
         }
         Some(Commands::Record) | None => {
             record_sleep().await?;
@@ -121,6 +127,45 @@ fn show_config() -> Result<(), Box<dyn std::error::Error>> {
     println!("  start_time_default: {}", config.start_time_default);
     println!("  end_time_default: {}", config.end_time_default);
     println!("  db_file_path: {}", config.db_file_path);
+    println!(
+        "  google_sheets_id: {}",
+        config
+            .google_sheets_id
+            .as_ref()
+            .unwrap_or(&"Not set".to_string())
+    );
+    println!(
+        "  google_credentials_path: {}",
+        config
+            .google_credentials_path
+            .as_ref()
+            .unwrap_or(&"Not set".to_string())
+    );
+    Ok(())
+}
+
+async fn export_to_sheets() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Config::load()?;
+
+    // Check if Google Sheets is configured
+    let sheets_id = config.google_sheets_id.as_ref().ok_or(
+        "Google Sheets ID not configured. Use: slog config google_sheets_id YOUR_SHEET_ID",
+    )?;
+    let credentials_path = config.google_credentials_path.as_ref()
+        .ok_or("Google credentials path not configured. Use: slog config google_credentials_path /path/to/credentials.json")?;
+
+    // Connect to database
+    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?.create_if_missing(false);
+    let pool = SqlitePool::connect_with(opts).await?;
+
+    // Create exporter and export
+    println!("Connecting to Google Sheets...");
+    let exporter = SheetsExporter::new(credentials_path, sheets_id.clone()).await?;
+
+    println!("Exporting data...");
+    exporter.export_all_data(&pool).await?;
+
+    println!("Successfully exported all data to Google Sheets!");
     Ok(())
 }
 
@@ -135,20 +180,22 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // creates database if doesn't exist
-    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?
-        .create_if_missing(true);
+    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?.create_if_missing(true);
 
-    let pool = SqlitePool::connect_with(opts).await.expect("Failed to connect with db");
+    let pool = SqlitePool::connect_with(opts)
+        .await
+        .expect("Failed to connect with db");
 
     let _ = sqlx::migrate!().run(&pool).await;
 
-    let now = Local::now().fixed_offset().checked_sub_days(Days::new(1)).unwrap();
+    let now = Local::now()
+        .fixed_offset()
+        .checked_sub_days(Days::new(1))
+        .unwrap();
     let start_date: NaiveDate = DateSelect::new("Date:")
-        .with_default(NaiveDate::from_ymd_opt(
-            now.year(),
-            now.month(),
-            now.day())
-            .expect("Failed to get start date")
+        .with_default(
+            NaiveDate::from_ymd_opt(now.year(), now.month(), now.day())
+                .expect("Failed to get start date"),
         )
         .prompt()?;
     let start_date_str = start_date.format("%Y-%m-%d").to_string();
@@ -160,12 +207,13 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .prompt()?;
     let start = format!("{start_date_str} {_start_time}");
 
-    let minutes_to_fall_asleep = CustomType::<i32>::new("How many minutes did it take you to fall asleep?")
-        .with_error_message("Please type a valid number")
-        .with_help_message("Type a number")
-        .with_default(0)
-        .prompt()
-        .expect("Failed");
+    let minutes_to_fall_asleep =
+        CustomType::<i32>::new("How many minutes did it take you to fall asleep?")
+            .with_error_message("Please type a valid number")
+            .with_help_message("Type a number")
+            .with_default(0)
+            .prompt()
+            .expect("Failed");
 
     let awake_count = CustomType::<i16>::new("How many times did you wake up minus one?")
         .with_error_message("Please type a valid number")
@@ -174,24 +222,27 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .prompt()
         .expect("Failed");
 
-    let time_awake = CustomType::<i32>::new("How long were you awake if you add together the # of minutes awake?")
-        .with_error_message("Please type a valid number")
-        .with_help_message("Type a number in minutes")
-        .with_default(0)
-        .prompt()
-        .expect("Failed");
+    let time_awake = CustomType::<i32>::new(
+        "How long were you awake if you add together the # of minutes awake?",
+    )
+    .with_error_message("Please type a valid number")
+    .with_help_message("Type a number in minutes")
+    .with_default(0)
+    .prompt()
+    .expect("Failed");
 
     let _end_time: String = Text::new("End Time: in HH:MM:SS")
         .with_default(&config.end_time_default)
         .prompt()?;
     let end = format!("{end_date_str} {_end_time}");
 
-    let time_in_bed_after_waking = CustomType::<i32>::new("How long did you lie in bed after waking? (minutes)")
-        .with_error_message("Please type a valid number")
-        .with_help_message("Type a number in minutes")
-        .with_default(0)
-        .prompt()
-        .expect("Failed");
+    let time_in_bed_after_waking =
+        CustomType::<i32>::new("How long did you lie in bed after waking? (minutes)")
+            .with_error_message("Please type a valid number")
+            .with_help_message("Type a number in minutes")
+            .with_default(0)
+            .prompt()
+            .expect("Failed");
 
     let quality_options: Vec<Quality> = Quality::iter().collect();
     let quality = Select::new("Quality", quality_options)
@@ -251,8 +302,20 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => {
             eprintln!("Error executing SQL: {}", e);
             eprintln!("SQL: {}", sql);
-            eprintln!("Parameters: start={}, minutes_to_fall_asleep={}, end={}, awake_count={}, time_awake={}, time_in_bed_after_waking={}, quality={}, melatonin={}, benadryl={}, edible={}, exertion={}",
-                start, minutes_to_fall_asleep, end, awake_count, time_awake, time_in_bed_after_waking, quality.db_value(), melatonin, benadryl, edible, exertion.db_value());
+            eprintln!(
+                "Parameters: start={}, minutes_to_fall_asleep={}, end={}, awake_count={}, time_awake={}, time_in_bed_after_waking={}, quality={}, melatonin={}, benadryl={}, edible={}, exertion={}",
+                start,
+                minutes_to_fall_asleep,
+                end,
+                awake_count,
+                time_awake,
+                time_in_bed_after_waking,
+                quality.db_value(),
+                melatonin,
+                benadryl,
+                edible,
+                exertion.db_value()
+            );
             return Err(Box::new(e));
         }
     }

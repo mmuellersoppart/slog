@@ -34,6 +34,8 @@ The configuration file (`~/.config/slog/config.yml`) contains the following fiel
 start_time_default: '21:30:00'
 end_time_default: '05:30:00'
 db_file_path: /Users/yourusername/.local/share/slog/slog.db
+google_sheets_id: null
+google_credentials_path: null
 ```
 
 ### Configuration Fields
@@ -41,6 +43,8 @@ db_file_path: /Users/yourusername/.local/share/slog/slog.db
 - **`start_time_default`**: Default start time for sleep sessions (format: HH:MM:SS)
 - **`end_time_default`**: Default end time for sleep sessions (format: HH:MM:SS)
 - **`db_file_path`**: Full path to the SQLite database file
+- **`google_sheets_id`**: Google Sheets spreadsheet ID for data export (optional)
+- **`google_credentials_path`**: Path to Google service account credentials JSON file (optional)
 
 ## Usage
 
@@ -92,6 +96,31 @@ slog config db_file_path /path/to/your/custom/db
 ```
 
 You can also manually edit `~/.config/slog/config.yml` with any text editor.
+
+### Export to Google Sheets
+
+Export all sleep data to a Google Sheets spreadsheet:
+
+```bash
+slog export
+```
+
+**Setup Requirements:**
+
+1. Create a Google Cloud Project and enable the Google Sheets API
+2. Create a Service Account and download the credentials JSON file
+3. Share your Google Sheet with the service account email (found in the credentials JSON)
+4. Configure the app with your spreadsheet ID and credentials path:
+
+```bash
+# Set the Google Sheets ID (found in the sheet URL)
+slog config google_sheets_id YOUR_SPREADSHEET_ID
+
+# Set the path to your service account credentials
+slog config google_credentials_path /path/to/credentials.json
+```
+
+The export will replace all data in Sheet1 of the spreadsheet with the current database contents.
 
 ## Data Tracked
 
