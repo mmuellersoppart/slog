@@ -44,23 +44,7 @@ impl Quality {
     }
 }
 
-#[derive(Debug, EnumIter, strum_macros::Display)]
-enum Mood {
-    Sad,
-    Neutral,
-    Exuberant,
-}
 
-
-impl Mood {
-    fn db_value(&self) -> i8 {
-        match self {
-            Mood::Sad => -1,
-            Mood::Neutral => 0,
-            Mood::Exuberant => 1,
-        }
-    }
-}
 
 #[derive(Debug, EnumIter, strum_macros::Display)]
 enum Exertion {
@@ -136,7 +120,7 @@ fn show_config() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Config file: {}", Config::config_path().display());
     println!("  start_time_default: {}", config.start_time_default);
     println!("  end_time_default: {}", config.end_time_default);
-    println!("  db_location: {}", config.db_location);
+    println!("  db_file_path: {}", config.db_file_path);
     Ok(())
 }
 
@@ -145,7 +129,7 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load()?;
 
     // Ensure database directory exists
-    let db_path = std::path::Path::new(&config.db_location);
+    let db_path = std::path::Path::new(&config.db_file_path);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -176,14 +160,35 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .prompt()?;
     let start = format!("{start_date_str} {_start_time}");
 
+    let minutes_to_fall_asleep = CustomType::<i32>::new("How many minutes did it take you to fall asleep?")
+        .with_error_message("Please type a valid number")
+        .with_help_message("Type a number")
+        .with_default(0)
+        .prompt()
+        .expect("Failed");
+
+    let awake_count = CustomType::<i16>::new("How many times did you wake up minus one?")
+        .with_error_message("Please type a valid number")
+        .with_help_message("Type a number")
+        .with_default(0)
+        .prompt()
+        .expect("Failed");
+
+    let time_awake = CustomType::<i32>::new("How long were you awake if you add together the # of minutes awake?")
+        .with_error_message("Please type a valid number")
+        .with_help_message("Type a number in minutes")
+        .with_default(0)
+        .prompt()
+        .expect("Failed");
+
     let _end_time: String = Text::new("End Time: in HH:MM:SS")
         .with_default(&config.end_time_default)
         .prompt()?;
     let end = format!("{end_date_str} {_end_time}");
 
-    let awake_count = CustomType::<i16>::new("How many times did you wake up minus one?")
+    let time_in_bed_after_waking = CustomType::<i32>::new("How long did you lie in bed after waking? (minutes)")
         .with_error_message("Please type a valid number")
-        .with_help_message("Type a number")
+        .with_help_message("Type a number in minutes")
         .with_default(0)
         .prompt()
         .expect("Failed");
@@ -194,33 +199,21 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .prompt()
         .expect("failed to read Quality prompt.");
 
-    let is_sleep_ritual = Confirm::new("sleep ritual?")
-        .with_default(true)
+    let melatonin = CustomType::<f32>::new("How much melatonin did you use? (mg)")
+        .with_error_message("Please type a valid number")
+        .with_help_message("Type a number")
+        .with_default(0.0)
         .prompt()
-        .unwrap();
+        .expect("Failed");
 
-    let is_stress = Confirm::new("stressed?")
-        .with_default(false)
+    let benadryl = CustomType::<f32>::new("How much benadryl did you use? (mg)")
+        .with_error_message("Please type a valid number")
+        .with_help_message("Type a number")
+        .with_default(0.0)
         .prompt()
-        .unwrap();
+        .expect("Failed");
 
-    let mood_options: Vec<Mood> = Mood::iter().collect();
-    let mood: Mood = Select::new("Mood", mood_options)
-        .with_starting_cursor(1)
-        .prompt()
-        .expect("failed to read Mood prompt.");
-
-    let is_heartburn = Confirm::new("heartburn?")
-        .with_default(false)
-        .prompt()
-        .unwrap();
-
-    let is_ibs_flareup = Confirm::new("is_ibs_flareup?")
-        .with_default(false)
-        .prompt()
-        .unwrap();
-
-    let melatonin = CustomType::<f32>::new("How much melatonin did you use?")
+    let edible = CustomType::<f32>::new("How much edible did you use? (mg)")
         .with_error_message("Please type a valid number")
         .with_help_message("Type a number")
         .with_default(0.0)
@@ -233,23 +226,36 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .prompt()
         .expect("failed to read Exertion prompt.");
 
-    let result = sqlx::query(
-        "INSERT INTO sleep (start, end, awake_count, quality, is_sleep_ritual, is_stress, mood, is_heartburn, is_ibs_flareup, melatonin, exertion)
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
-        .bind(start)
-        .bind(end)
-        .bind(awake_count)
-        .bind(quality.db_value())
-        .bind(is_sleep_ritual)
-        .bind(is_stress)
-        .bind(mood.db_value())
-        .bind(is_heartburn)
-        .bind(is_ibs_flareup)
-        .bind(melatonin)
-        .bind(exertion.db_value())
-        .execute(&pool).await?;
+    let sql = "INSERT INTO sleep (start, minutes_to_fall_asleep, end, awake_count, time_awake, time_in_bed_after_waking, quality, melatonin, benadryl, edible, exertion)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
 
-    println!("Sleep data recorded successfully!");
+    let result = sqlx::query(sql)
+        .bind(&start)
+        .bind(minutes_to_fall_asleep)
+        .bind(&end)
+        .bind(awake_count)
+        .bind(time_awake)
+        .bind(time_in_bed_after_waking)
+        .bind(quality.db_value())
+        .bind(melatonin)
+        .bind(benadryl)
+        .bind(edible)
+        .bind(exertion.db_value())
+        .execute(&pool)
+        .await;
+
+    match result {
+        Ok(_) => {
+            println!("Sleep data recorded successfully!");
+        }
+        Err(e) => {
+            eprintln!("Error executing SQL: {}", e);
+            eprintln!("SQL: {}", sql);
+            eprintln!("Parameters: start={}, minutes_to_fall_asleep={}, end={}, awake_count={}, time_awake={}, time_in_bed_after_waking={}, quality={}, melatonin={}, benadryl={}, edible={}, exertion={}",
+                start, minutes_to_fall_asleep, end, awake_count, time_awake, time_in_bed_after_waking, quality.db_value(), melatonin, benadryl, edible, exertion.db_value());
+            return Err(Box::new(e));
+        }
+    }
 
     Ok(())
 }

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub start_time_default: String,
     pub end_time_default: String,
-    pub db_location: String,
+    pub db_file_path: String,
 }
 
 impl Default for Config {
@@ -24,16 +24,15 @@ impl Default for Config {
         Config {
             start_time_default: "21:30:00".to_string(),
             end_time_default: "05:30:00".to_string(),
-            db_location: default_db,
+            db_file_path: default_db,
         }
     }
 }
 
 impl Config {
     pub fn config_path() -> PathBuf {
-        let config_dir = dirs::config_dir()
-            .expect("Failed to get config directory")
-            .join("slog");
+        let home = dirs::home_dir().expect("Failed to get home directory");
+        let config_dir = home.join(".config").join("slog");
 
         fs::create_dir_all(&config_dir).expect("Failed to create config directory");
         config_dir.join("config.yml")
@@ -74,8 +73,8 @@ impl Config {
                 self.end_time_default = value;
                 Ok(())
             }
-            "db_location" => {
-                self.db_location = value;
+            "db_file_path" => {
+                self.db_file_path = value;
                 Ok(())
             }
             _ => Err(format!("Unknown field: {}", field)),
@@ -83,6 +82,6 @@ impl Config {
     }
 
     pub fn get_db_url(&self) -> String {
-        format!("sqlite:{}", self.db_location)
+        format!("sqlite:{}", self.db_file_path)
     }
 }
