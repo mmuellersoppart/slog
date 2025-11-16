@@ -1,5 +1,5 @@
 mod config;
-mod sheets;
+// mod sheets;
 
 use std::fmt;
 use std::str::FromStr;
@@ -9,7 +9,7 @@ use tokio::runtime::Runtime;
 use sqlx::ConnectOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 
-use chrono::{Datelike, Days, Local, NaiveDate, Utc};
+use chrono::{Datelike, Days, Local, NaiveDate, NaiveDateTime, Utc};
 use std::fmt::{Display, Formatter};
 
 use inquire::formatter::CustomTypeFormatter;
@@ -25,7 +25,7 @@ use strum::IntoEnumIterator;
 use clap::{Parser, Subcommand};
 
 use config::Config;
-use sheets::SheetsExporter;
+// use sheets::SheetsExporter;
 
 #[derive(Debug, EnumIter, strum_macros::Display)]
 enum Quality {
@@ -86,8 +86,8 @@ enum Commands {
     },
     /// Show current configuration
     ShowConfig,
-    /// Export all data to Google Sheets
-    Export,
+    // /// Export all data to Google Sheets
+    // Export,
 }
 
 #[tokio::main]
@@ -101,9 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::ShowConfig) => {
             show_config()?;
         }
-        Some(Commands::Export) => {
-            export_to_sheets().await?;
-        }
+        // Some(Commands::Export) => {
+        //     export_to_sheets().await?;
+        // }
         Some(Commands::Record) | None => {
             record_sleep().await?;
         }
@@ -144,30 +144,30 @@ fn show_config() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn export_to_sheets() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load()?;
-
-    // Check if Google Sheets is configured
-    let sheets_id = config.google_sheets_id.as_ref().ok_or(
-        "Google Sheets ID not configured. Use: slog config google_sheets_id YOUR_SHEET_ID",
-    )?;
-    let credentials_path = config.google_credentials_path.as_ref()
-        .ok_or("Google credentials path not configured. Use: slog config google_credentials_path /path/to/credentials.json")?;
-
-    // Connect to database
-    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?.create_if_missing(false);
-    let pool = SqlitePool::connect_with(opts).await?;
-
-    // Create exporter and export
-    println!("Connecting to Google Sheets...");
-    let exporter = SheetsExporter::new(credentials_path, sheets_id.clone()).await?;
-
-    println!("Exporting data...");
-    exporter.export_all_data(&pool).await?;
-
-    println!("Successfully exported all data to Google Sheets!");
-    Ok(())
-}
+// async fn export_to_sheets() -> Result<(), Box<dyn std::error::Error>> {
+//     let config = Config::load()?;
+//
+//     // Check if Google Sheets is configured
+//     let sheets_id = config.google_sheets_id.as_ref().ok_or(
+//         "Google Sheets ID not configured. Use: slog config google_sheets_id YOUR_SHEET_ID",
+//     )?;
+//     let credentials_path = config.google_credentials_path.as_ref()
+//         .ok_or("Google credentials path not configured. Use: slog config google_credentials_path /path/to/credentials.json")?;
+//
+//     // Connect to database
+//     let opts = SqliteConnectOptions::from_str(&config.get_db_url())?.create_if_missing(false);
+//     let pool = SqlitePool::connect_with(opts).await?;
+//
+//     // Create exporter and export
+//     println!("Connecting to Google Sheets...");
+//     let exporter = SheetsExporter::new(credentials_path, sheets_id.clone()).await?;
+//
+//     println!("Exporting data...");
+//     exporter.export_all_data(&pool).await?;
+//
+//     println!("Successfully exported all data to Google Sheets!");
+//     Ok(())
+// }
 
 async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     // Load config
@@ -206,6 +206,38 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .with_default(&config.start_time_default)
         .prompt()?;
     let start = format!("{start_date_str} {_start_time}");
+
+    // Check for existing entries on this date
+    let existing_query = "SELECT id, start, end FROM sleep WHERE DATE(start) = DATE(?)";
+    let existing: Option<(i64, String, Option<String>)> = sqlx::query_as(existing_query)
+        .bind(&start)
+        .fetch_optional(&pool)
+        .await?;
+
+    if let Some((existing_id, existing_start, existing_end)) = existing {
+        println!("\n⚠️  An entry already exists for this date:");
+        println!("   Start: {}", existing_start);
+        if let Some(end) = existing_end {
+            println!("   End: {}", end);
+        }
+
+        let should_delete =
+            Confirm::new("Do you want to delete the existing entry and create a new one?")
+                .with_default(false)
+                .prompt()?;
+
+        if should_delete {
+            let delete_sql = "DELETE FROM sleep WHERE id = ?";
+            sqlx::query(delete_sql)
+                .bind(existing_id)
+                .execute(&pool)
+                .await?;
+            println!("✓ Existing entry deleted.");
+        } else {
+            println!("Cancelled. No changes made.");
+            return Ok(());
+        }
+    }
 
     let minutes_to_fall_asleep =
         CustomType::<i32>::new("How many minutes did it take you to fall asleep?")
@@ -297,7 +329,22 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
 
     match result {
         Ok(_) => {
+            // Calculate total sleep time and efficiency
+            let start_dt = NaiveDateTime::parse_from_str(&start, "%Y-%m-%d %H:%M:%S")?;
+            let end_dt = NaiveDateTime::parse_from_str(&end, "%Y-%m-%d %H:%M:%S")?;
+            let total_time_in_bed = (end_dt - start_dt).num_minutes();
+            let total_sleep_minutes =
+                total_time_in_bed - minutes_to_fall_asleep as i64 - time_awake as i64;
+            let sleep_efficiency = (total_sleep_minutes as f64 / total_time_in_bed as f64) * 100.0;
+
             println!("Sleep data recorded successfully!");
+            println!("\n=== Sleep Summary ===");
+            println!(
+                "Total time in bed: {} minutes ({:.1} hours)",
+                total_time_in_bed,
+                total_time_in_bed as f64 / 60.0
+            );
+            println!("Sleep efficiency: {:.1}%", sleep_efficiency);
         }
         Err(e) => {
             eprintln!("Error executing SQL: {}", e);
