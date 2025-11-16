@@ -170,6 +170,15 @@ fn show_config() -> Result<(), Box<dyn std::error::Error>> {
 // }
 
 async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
+    // Display welcome message
+    println!("\n╔═══════════════════════════════════╗");
+    println!("║  🥱💤 SLOG (The Sleep Log) 💤🥱   ║");
+    println!("╚═══════════════════════════════════╝");
+    println!(
+        "                                v{}\n",
+        env!("CARGO_PKG_VERSION")
+    );
+
     // Load config
     let config = Config::load()?;
 

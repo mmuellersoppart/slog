@@ -141,4 +141,5 @@ Each sleep session records:
 The SQLite database contains a `sleep` table with all tracked metrics. Migrations are automatically applied on startup.
 
 ## release
+`cargo build release`
 `cp ./target/debug/slog ~/.local/bin/slog`
