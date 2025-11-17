@@ -24,8 +24,8 @@ impl Default for Config {
             .to_string();
 
         Config {
-            start_time_default: "21:30:00".to_string(),
-            end_time_default: "05:30:00".to_string(),
+            start_time_default: "21:30".to_string(),
+            end_time_default: "05:30".to_string(),
             db_file_path: default_db,
             google_sheets_id: None,
             google_credentials_path: None,

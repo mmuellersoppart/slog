@@ -211,9 +211,10 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     let end_date = start_date.checked_add_days(Days::new(1)).unwrap();
     let end_date_str = end_date.format("%Y-%m-%d").to_string();
 
-    let _start_time: String = Text::new("Start Time: in HH:MM:SS")
+    let _start_time_input: String = Text::new("Start Time (HH:MM)")
         .with_default(&config.start_time_default)
         .prompt()?;
+    let _start_time = format!("{}:00", _start_time_input);
     let start = format!("{start_date_str} {_start_time}");
 
     // Check for existing entries on this date
@@ -272,9 +273,10 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     .prompt()
     .expect("Failed");
 
-    let _end_time: String = Text::new("End Time: in HH:MM:SS")
+    let _end_time_input: String = Text::new("End Time (HH:MM)")
         .with_default(&config.end_time_default)
         .prompt()?;
+    let _end_time = format!("{}:00", _end_time_input);
     let end = format!("{end_date_str} {_end_time}");
 
     let time_in_bed_after_waking =
