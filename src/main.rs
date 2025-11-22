@@ -345,7 +345,7 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
             let end_dt = NaiveDateTime::parse_from_str(&end, "%Y-%m-%d %H:%M:%S")?;
             let total_time_in_bed = (end_dt - start_dt).num_minutes();
             let total_sleep_minutes =
-                total_time_in_bed - minutes_to_fall_asleep as i64 - time_awake as i64;
+                total_time_in_bed - minutes_to_fall_asleep as i64 - time_awake as i64 - time_in_bed_after_waking as i64;
             let sleep_efficiency = (total_sleep_minutes as f64 / total_time_in_bed as f64) * 100.0;
 
             println!("Sleep data recorded successfully!");
