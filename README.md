@@ -86,10 +86,10 @@ Update configuration fields:
 
 ```bash
 # Change start time default
-slog config start_time_default 22:00:00
+slog config start_time_default 21:00
 
 # Change end time default
-slog config end_time_default 06:00:00
+slog config end_time_default 05:00
 
 # Change database file path
 slog config db_file_path /path/to/your/custom/db
@@ -141,5 +141,5 @@ Each sleep session records:
 The SQLite database contains a `sleep` table with all tracked metrics. Migrations are automatically applied on startup.
 
 ## release
-`cargo build release`
+`cargo build -release`
 `cp ./target/debug/slog ~/.local/bin/slog`
