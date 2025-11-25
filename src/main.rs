@@ -79,6 +79,11 @@ enum Commands {
     Record,
     /// Delete an entry by date
     Delete,
+    /// List recent sleep entries
+    List {
+        /// Number of entries to display (default: 10)
+        count: Option<usize>,
+    },
     /// Edit configuration settings
     Config {
         /// Configuration field to edit (start_time_default, end_time_default, db_file_path, google_sheets_id, google_credentials_path)
@@ -105,6 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Delete) => {
             delete_entry().await?;
+        }
+        Some(Commands::List { count }) => {
+            list_entries(count.unwrap_or(10)).await?;
         }
         // Some(Commands::Export) => {
         //     export_to_sheets().await?;
@@ -173,6 +181,93 @@ fn show_config() -> Result<(), Box<dyn std::error::Error>> {
 //     println!("Successfully exported all data to Google Sheets!");
 //     Ok(())
 // }
+
+async fn list_entries(count: usize) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n╔═══════════════════════════════════╗");
+    println!("║      📊 Recent Sleep Entries      ║");
+    println!("╚═══════════════════════════════════╝\n");
+
+    // Load config
+    let config = Config::load()?;
+
+    // Connect to database
+    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?.create_if_missing(false);
+    let pool = SqlitePool::connect_with(opts).await?;
+
+    // Query for recent entries
+    let query = r#"
+        SELECT
+            start,
+            end,
+            minutes_to_fall_asleep,
+            time_awake,
+            time_in_bed_after_waking,
+            quality
+        FROM sleep
+        ORDER BY start DESC
+        LIMIT ?
+    "#;
+
+    let entries: Vec<(String, Option<String>, i32, i32, i32, i8)> = sqlx::query_as(query)
+        .bind(count as i32)
+        .fetch_all(&pool)
+        .await?;
+
+    if entries.is_empty() {
+        println!("No sleep entries found.");
+        return Ok(());
+    }
+
+    println!(
+        "{:<12} {:<8} {:<12} {:<10} {:<12}",
+        "Date", "Start", "Time in Bed", "Quality", "Efficiency"
+    );
+    println!("{}", "─".repeat(70));
+
+    for (start, end, minutes_to_fall_asleep, time_awake, time_in_bed_after_waking, quality) in
+        entries
+    {
+        let start_dt = NaiveDateTime::parse_from_str(&start, "%Y-%m-%d %H:%M:%S")?;
+        let date = start_dt.format("%Y-%m-%d").to_string();
+        let start_time = start_dt.format("%H:%M").to_string();
+
+        if let Some(end_str) = end {
+            let end_dt = NaiveDateTime::parse_from_str(&end_str, "%Y-%m-%d %H:%M:%S")?;
+            let total_time_in_bed = (end_dt - start_dt).num_minutes();
+            let total_sleep_minutes = total_time_in_bed
+                - minutes_to_fall_asleep as i64
+                - time_awake as i64
+                - time_in_bed_after_waking as i64;
+            let sleep_efficiency = (total_sleep_minutes as f64 / total_time_in_bed as f64) * 100.0;
+
+            let hours = total_time_in_bed / 60;
+            let mins = total_time_in_bed % 60;
+            let time_in_bed_str = format!("{}h {:02}m", hours, mins);
+
+            let quality_str = match quality {
+                -2 => "Devastation",
+                -1 => "Terrible",
+                0 => "Blah",
+                1 => "Okay",
+                2 => "Perfection",
+                _ => "Unknown",
+            };
+
+            println!(
+                "{:<12} {:<8} {:<12} {:<10} {:<12.1}%",
+                date, start_time, time_in_bed_str, quality_str, sleep_efficiency
+            );
+        } else {
+            println!(
+                "{:<12} {:<8} {:<12} {:<10} {:<12}",
+                date, start_time, "N/A", "N/A", "N/A"
+            );
+        }
+    }
+
+    println!();
+    Ok(())
+}
 
 async fn delete_entry() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n╔═══════════════════════════════════╗");

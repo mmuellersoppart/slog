@@ -72,6 +72,25 @@ This will prompt you for:
 - Edible usage (mg)
 - Exertion level (Lazy, Normal, Exhausted)
 
+### List Sleep Entries
+
+View recent sleep entries in descending order (most recent first):
+
+```bash
+# List the 10 most recent entries (default)
+slog list
+
+# List a specific number of entries
+slog list 20
+```
+
+This displays:
+- Date
+- Start time
+- Time in bed (hours and minutes)
+- Sleep quality rating
+- Sleep efficiency percentage
+
 ### View Configuration
 
 Show current configuration settings:
