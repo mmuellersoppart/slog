@@ -77,6 +77,8 @@ struct Cli {
 enum Commands {
     /// Record new sleep data
     Record,
+    /// Delete an entry by date
+    Delete,
     /// Edit configuration settings
     Config {
         /// Configuration field to edit (start_time_default, end_time_default, db_file_path, google_sheets_id, google_credentials_path)
@@ -100,6 +102,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::ShowConfig) => {
             show_config()?;
+        }
+        Some(Commands::Delete) => {
+            delete_entry().await?;
         }
         // Some(Commands::Export) => {
         //     export_to_sheets().await?;
@@ -168,6 +173,69 @@ fn show_config() -> Result<(), Box<dyn std::error::Error>> {
 //     println!("Successfully exported all data to Google Sheets!");
 //     Ok(())
 // }
+
+async fn delete_entry() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n╔═══════════════════════════════════╗");
+    println!("║      🗑️  Delete Sleep Entry       ║");
+    println!("╚═══════════════════════════════════╝\n");
+
+    // Load config
+    let config = Config::load()?;
+
+    // Connect to database
+    let opts = SqliteConnectOptions::from_str(&config.get_db_url())?.create_if_missing(false);
+    let pool = SqlitePool::connect_with(opts).await?;
+
+    // Prompt for date
+    let now = Local::now().fixed_offset();
+    let delete_date: NaiveDate = DateSelect::new("Select the date of the entry to delete:")
+        .with_default(
+            NaiveDate::from_ymd_opt(now.year(), now.month(), now.day())
+                .expect("Failed to get current date"),
+        )
+        .prompt()?;
+
+    // Look for entry on this date
+    let query = "SELECT id, start, end, quality, notes FROM sleep WHERE DATE(start) = ?";
+    let date_str = delete_date.format("%Y-%m-%d").to_string();
+
+    let entry: Option<(i64, String, Option<String>, i8, Option<String>)> = sqlx::query_as(query)
+        .bind(&date_str)
+        .fetch_optional(&pool)
+        .await?;
+
+    match entry {
+        Some((id, start, end, quality, notes)) => {
+            println!("\n📋 Found entry:");
+            println!("   ID: {}", id);
+            println!("   Start: {}", start);
+            if let Some(end_time) = end {
+                println!("   End: {}", end_time);
+            }
+            println!("   Quality: {}", quality);
+            if let Some(note_text) = notes {
+                println!("   Notes: {}", note_text);
+            }
+
+            let confirm = Confirm::new("Are you sure you want to delete this entry?")
+                .with_default(false)
+                .prompt()?;
+
+            if confirm {
+                let delete_sql = "DELETE FROM sleep WHERE id = ?";
+                sqlx::query(delete_sql).bind(id).execute(&pool).await?;
+                println!("✓ Entry deleted successfully!");
+            } else {
+                println!("Cancelled. No changes made.");
+            }
+        }
+        None => {
+            println!("❌ No entry found for date: {}", date_str);
+        }
+    }
+
+    Ok(())
+}
 
 async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     // Display welcome message
@@ -320,8 +388,18 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .prompt()
         .expect("failed to read Exertion prompt.");
 
-    let sql = "INSERT INTO sleep (start, minutes_to_fall_asleep, end, awake_count, time_awake, time_in_bed_after_waking, quality, melatonin, benadryl, edible, exertion)
-        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
+    let notes: String = Text::new("Is there anything else you'd like to add?")
+        .with_default("")
+        .prompt()?;
+
+    let notes_value = if notes.trim().is_empty() {
+        None
+    } else {
+        Some(notes.trim().to_string())
+    };
+
+    let sql = "INSERT INTO sleep (start, minutes_to_fall_asleep, end, awake_count, time_awake, time_in_bed_after_waking, quality, melatonin, benadryl, edible, exertion, notes)
+        VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
 
     let result = sqlx::query(sql)
         .bind(&start)
@@ -335,6 +413,7 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
         .bind(benadryl)
         .bind(edible)
         .bind(exertion.db_value())
+        .bind(&notes_value)
         .execute(&pool)
         .await;
 
@@ -344,8 +423,10 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
             let start_dt = NaiveDateTime::parse_from_str(&start, "%Y-%m-%d %H:%M:%S")?;
             let end_dt = NaiveDateTime::parse_from_str(&end, "%Y-%m-%d %H:%M:%S")?;
             let total_time_in_bed = (end_dt - start_dt).num_minutes();
-            let total_sleep_minutes =
-                total_time_in_bed - minutes_to_fall_asleep as i64 - time_awake as i64 - time_in_bed_after_waking as i64;
+            let total_sleep_minutes = total_time_in_bed
+                - minutes_to_fall_asleep as i64
+                - time_awake as i64
+                - time_in_bed_after_waking as i64;
             let sleep_efficiency = (total_sleep_minutes as f64 / total_time_in_bed as f64) * 100.0;
 
             println!("Sleep data recorded successfully!");
@@ -361,7 +442,7 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("Error executing SQL: {}", e);
             eprintln!("SQL: {}", sql);
             eprintln!(
-                "Parameters: start={}, minutes_to_fall_asleep={}, end={}, awake_count={}, time_awake={}, time_in_bed_after_waking={}, quality={}, melatonin={}, benadryl={}, edible={}, exertion={}",
+                "Parameters: start={}, minutes_to_fall_asleep={}, end={}, awake_count={}, time_awake={}, time_in_bed_after_waking={}, quality={}, melatonin={}, benadryl={}, edible={}, exertion={}, notes={:?}",
                 start,
                 minutes_to_fall_asleep,
                 end,
@@ -372,7 +453,8 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
                 melatonin,
                 benadryl,
                 edible,
-                exertion.db_value()
+                exertion.db_value(),
+                notes_value
             );
             return Err(Box::new(e));
         }
