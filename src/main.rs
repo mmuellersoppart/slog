@@ -17,6 +17,7 @@ use inquire::{
     Confirm, CustomType, DateSelect, MultiSelect, Select, Text,
     error::{CustomUserError, InquireResult},
     required,
+    validator::Validation,
 };
 
 use strum::EnumIter;
@@ -62,6 +63,49 @@ impl Exertion {
             Exertion::Normal => 0,
             Exertion::Exhausted => 1,
         }
+    }
+}
+
+// Validates time format HH:MM
+fn validate_time_format(
+    input: &str,
+) -> Result<Validation, Box<dyn std::error::Error + Send + Sync>> {
+    let parts: Vec<&str> = input.split(':').collect();
+
+    if parts.len() != 2 {
+        return Ok(Validation::Invalid("Time must be in HH:MM format".into()));
+    }
+
+    let hours = match parts[0].parse::<u32>() {
+        Ok(h) => h,
+        Err(_) => return Ok(Validation::Invalid("Hours must be a valid number".into())),
+    };
+
+    let minutes = match parts[1].parse::<u32>() {
+        Ok(m) => m,
+        Err(_) => return Ok(Validation::Invalid("Minutes must be a valid number".into())),
+    };
+
+    if hours > 23 {
+        return Ok(Validation::Invalid("Hours must be between 0 and 23".into()));
+    }
+
+    if minutes > 59 {
+        return Ok(Validation::Invalid(
+            "Minutes must be between 0 and 59".into(),
+        ));
+    }
+
+    Ok(Validation::Valid)
+}
+
+// Normalize time format to HH:MM (strips seconds if present)
+fn normalize_time_to_hhmm(time: &str) -> String {
+    let parts: Vec<&str> = time.split(':').collect();
+    if parts.len() >= 2 {
+        format!("{}:{}", parts[0], parts[1])
+    } else {
+        time.to_string()
     }
 }
 
@@ -374,8 +418,10 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     let end_date = start_date.checked_add_days(Days::new(1)).unwrap();
     let end_date_str = end_date.format("%Y-%m-%d").to_string();
 
+    let start_time_default = normalize_time_to_hhmm(&config.start_time_default);
     let _start_time_input: String = Text::new("Start Time (HH:MM)")
-        .with_default(&config.start_time_default)
+        .with_default(&start_time_default)
+        .with_validator(|input: &str| validate_time_format(input))
         .prompt()?;
     let _start_time = format!("{}:00", _start_time_input);
     let start = format!("{start_date_str} {_start_time}");
@@ -436,8 +482,10 @@ async fn record_sleep() -> Result<(), Box<dyn std::error::Error>> {
     .prompt()
     .expect("Failed");
 
+    let end_time_default = normalize_time_to_hhmm(&config.end_time_default);
     let _end_time_input: String = Text::new("End Time (HH:MM)")
-        .with_default(&config.end_time_default)
+        .with_default(&end_time_default)
+        .with_validator(|input: &str| validate_time_format(input))
         .prompt()?;
     let _end_time = format!("{}:00", _end_time_input);
     let end = format!("{end_date_str} {_end_time}");

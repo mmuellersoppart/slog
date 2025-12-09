@@ -31,8 +31,8 @@ cargo build --release
 The configuration file (`~/.config/slog/config.yml`) contains the following fields:
 
 ```yaml
-start_time_default: '21:30:00'
-end_time_default: '05:30:00'
+start_time_default: '21:30'
+end_time_default: '05:30'
 db_file_path: /Users/yourusername/.local/share/slog/slog.db
 google_sheets_id: null
 google_credentials_path: null
@@ -40,8 +40,8 @@ google_credentials_path: null
 
 ### Configuration Fields
 
-- **`start_time_default`**: Default start time for sleep sessions (format: HH:MM:SS)
-- **`end_time_default`**: Default end time for sleep sessions (format: HH:MM:SS)
+- **`start_time_default`**: Default start time for sleep sessions (format: HH:MM)
+- **`end_time_default`**: Default end time for sleep sessions (format: HH:MM)
 - **`db_file_path`**: Full path to the SQLite database file
 - **`google_sheets_id`**: Google Sheets spreadsheet ID for data export (optional)
 - **`google_credentials_path`**: Path to Google service account credentials JSON file (optional)

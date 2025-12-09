@@ -70,10 +70,12 @@ impl Config {
     pub fn update_field(&mut self, field: &str, value: String) -> Result<(), String> {
         match field {
             "start_time_default" => {
+                Self::validate_time_format(&value)?;
                 self.start_time_default = value;
                 Ok(())
             }
             "end_time_default" => {
+                Self::validate_time_format(&value)?;
                 self.end_time_default = value;
                 Ok(())
             }
@@ -95,5 +97,30 @@ impl Config {
 
     pub fn get_db_url(&self) -> String {
         format!("sqlite:{}", self.db_file_path)
+    }
+
+    fn validate_time_format(input: &str) -> Result<(), String> {
+        let parts: Vec<&str> = input.split(':').collect();
+
+        if parts.len() != 2 {
+            return Err("Time must be in HH:MM format".to_string());
+        }
+
+        let hours = parts[0]
+            .parse::<u32>()
+            .map_err(|_| "Hours must be a valid number".to_string())?;
+        let minutes = parts[1]
+            .parse::<u32>()
+            .map_err(|_| "Minutes must be a valid number".to_string())?;
+
+        if hours > 23 {
+            return Err("Hours must be between 0 and 23".to_string());
+        }
+
+        if minutes > 59 {
+            return Err("Minutes must be between 0 and 59".to_string());
+        }
+
+        Ok(())
     }
 }
